@@ -1,10 +1,5 @@
 # Hot/Cold B-tree Index (HCIndex): Standalone Implementation and Evaluation
 
-**CS 543 — Project 2**  
-**Authors:** Arya Fayyazi, Mahtab Movahhedrad, Vibhav Laud 
-**Date:** Fall 2025
-
----
 
 # 1. Introduction
 
