@@ -153,12 +153,7 @@ The primary performance metric: the number of cold B-tree node visits per query.
 
 ---
 
-## Course Context
-
-Developed for **CS 543 — Database System Implementation, Fall 2025** (Project 2). The project explores the intersection of learned index structures and adaptive system design.
-
----
-
 ## License
 
 For academic and educational use. See repository root for full license details.
+
