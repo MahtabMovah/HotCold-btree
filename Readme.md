@@ -1,113 +1,164 @@
-# Hot/Cold B-tree Index with Machine Learning–Based Adaptive Sampling  
-CS 543 — Project 2 (Fall 2025)
+# ThermoBTree — Hot/Cold B-tree Index with ML-Based Adaptive Sampling
 
-This repository contains a standalone implementation of a **Hot/Cold B-tree Index (HCIndex)**, extended with **machine-learning–driven adaptive sampling** for dynamic promotion of hot keys into a fast in-memory hot tier. The project is built around the idea that real-world workloads are often highly skewed, meaning a small subset of keys receives a large portion of queries. By learning which keys deserve fast-path treatment, the system can reduce logical work per query and improve performance.
+> A self-tuning index structure that learns which keys deserve fast-path treatment — combining classical B-tree indexing with reinforcement learning to dynamically adapt to skewed workloads.
 
 ---
 
 ## Overview
 
-The system maintains two B-trees:
+Real-world database workloads are rarely uniform. A small subset of keys — the "hot" keys — typically receives a disproportionately large share of queries. **ThermoBTree** exploits this by maintaining two B-tree tiers and using machine learning to decide which keys should live in the fast tier.
 
-1. **Cold B-tree**  
-   Contains *all* keys and acts as the fallback index.
+The system maintains:
 
-2. **Hot B-tree**  
-   Contains frequently accessed keys that have been promoted based on hit scores and a sampling policy.
+| Tier | Description |
+|---|---|
+| **Cold B-tree** | Contains *all* keys — the canonical fallback index |
+| **Hot B-tree** | Contains frequently accessed keys promoted from the cold tier based on learned hit scores |
 
-Hits, node visits, and promotions are tracked for analysis.
-
-A key component of the system is the **sampling rate (D)**, which determines the probability of promoting a key from the cold tree into the hot tree once it becomes sufficiently “hot”.
-
----
-
-## Machine Learning Approaches for Adaptive Sampling
-
-The project explores **three different adaptation strategies** for adjusting the sampling rate \(D\).  
-These represent increasing levels of sophistication, moving from simple heuristics to true ML and RL-based learning.
-
-### 1. Heuristic Hill-Climbing (Initial Approach)
-
-The first approach used a simple rule-based hill-climbing strategy.  
-After every fixed number of queries, the system measured the change in cost (node visits per query) relative to the previous interval. If cost decreased when the sampling rate \(D\) was increased previously, the system increased \(D\) again. If cost increased, the system reversed direction.  
-
-This method did not learn a predictive model and relied only on short-term fluctuations. As a result, it was unstable under noise and often adjusted the sampling rate in unhelpful ways.
+A key control parameter — the **sampling rate D** — governs the probability of promoting a key from cold to hot once it becomes sufficiently active. The core research question this project investigates is: *can the system learn the optimal D automatically, without manual tuning?*
 
 ---
 
-### 2. Online Linear Regression with Stochastic Gradient Descent (Second Approach)
+## ML Adaptation Strategies
 
-The second approach implemented a classical ML method: **online linear regression**.  
-The system attempted to learn a cost function of the form:
-
-\[
-\widehat{\text{cost}}(D) = w_0 + w_1 D
-\]
-
-The weights \(w_0\) and \(w_1\) were updated using stochastic gradient descent based on observed prediction errors.  
-After each interval, the model used the sign of the learned slope \(w_1\) to decide whether to increase or decrease \(D\).
-
-Although this was a true ML model, the cost surface turned out to be noisy and poorly modeled by a linear function, causing the system to learn an incorrect relationship and push \(D\) toward very small values.
+Three progressively more sophisticated approaches were implemented and evaluated for adaptive sampling rate control. All three are available as separate branches.
 
 ---
 
-### 3. Epsilon-Greedy Multi-Armed Bandit (Final and Improved Approach)
+### Approach 1 — Heuristic Hill-Climbing
 
-The third and most successful approach uses an **epsilon-greedy multi-armed bandit**, a simple reinforcement-learning technique.  
-Instead of modeling cost as a continuous function of \(D\), the system evaluates a small set of discrete sampling-rate options (e.g., \(D = 0.3, 0.5, 0.7, 1.0\)). Each value of \(D\) is treated as an “arm” of the bandit.  
+A simple rule-based controller that adjusts D after every fixed interval of queries based on whether the previous adjustment improved cost (measured in node visits per query).
 
-For each arm, the system keeps track of the average cold-node cost observed when that sampling rate is used. Using an ε-greedy strategy, the controller occasionally explores different sampling rates but otherwise exploits the one with the lowest observed cost.
+**How it works:**
+- If increasing D reduced cost → increase D again
+- If increasing D raised cost → reverse direction
 
-This approach avoids incorrect assumptions about the cost function, is stable under noise, and learns a good sampling rate for the workload.
+**Outcome:** Unstable under workload noise. The controller frequently adjusted D in unhelpful directions because it had no model of the underlying cost surface and reacted only to short-term fluctuations.
+
+---
+
+### Approach 2 — Online Linear Regression with SGD
+
+A classical machine learning model that attempts to learn the relationship between sampling rate and query cost, then uses the learned model to drive D toward the optimal value.
+
+**Model:**
+
+```
+cost_hat(D) = w₀ + w₁ · D
+```
+
+Weights `w₀` and `w₁` are updated online via stochastic gradient descent after each measurement interval. The sign of the learned slope `w₁` determines whether D is increased or decreased.
+
+**Outcome:** The true cost surface is nonlinear and noisy, making it poorly modeled by a linear function. The system learned an incorrect relationship and converged to very small values of D, degrading performance.
+
+---
+
+### Approach 3 — Epsilon-Greedy Multi-Armed Bandit *(Best)*
+
+A reinforcement learning approach that treats each candidate sampling rate as an independent "arm" of a bandit and directly estimates the reward (query cost) of each arm from observed data — without assuming any functional form.
+
+**Candidate arms:** `D ∈ { 0.3, 0.5, 0.7, 1.0 }`
+
+For each arm, the controller tracks the average cold-node cost observed during periods when that sampling rate was active. Using an **ε-greedy strategy**:
+- With probability `ε` → **explore**: pick a random arm
+- With probability `1 - ε` → **exploit**: pick the arm with the lowest observed average cost
+
+**Outcome:** Stable under noise, makes no assumptions about the cost function, and reliably converges to a good sampling rate for the given workload distribution.
+
+| Strategy | Stability | Accuracy | Assumptions |
+|---|---|---|---|
+| Hill-Climbing | ❌ Unstable | ❌ Poor | Monotone cost surface |
+| Linear Regression + SGD | ⚠️ Moderate | ❌ Poor | Linear cost–D relationship |
+| ε-Greedy Bandit | ✅ Stable | ✅ Good | None |
 
 ---
 
 ## Repository Structure
 
-543_Project2/
-
-├── Makefile
-
-├── main.c
-
-├── btree.c
-
+```
+ThermoBTree/
+├── Makefile                  # Build configuration
+├── main.c                    # Workload generator, CLI, experiment harness
+├── btree.c                   # Core in-memory B-tree implementation
 ├── btree.h
-
-├── hctree.c
-
+├── hctree.c                  # Hot/Cold index layer + ML adaptation logic
 ├── hctree.h
+├── analyze_hctree.py         # Plotting and statistical analysis of results
+└── results.csv               # Example benchmark output
+```
 
-├── analyze_hctree.py
+### Module Responsibilities
 
-└── results.csv
-
-
-- **btree.*:** Core B-tree implementation (in-memory, simplified).  
-- **hctree.*:** Hot/Cold index layer + ML adaptation logic.  
-- **main.c:** Workload generator, CLI, and experiment harness.  
-- **analyze_hctree.py:** Plotting and statistical analysis of results.  
-- **results.csv:** Example benchmark output.
+| File | Responsibility |
+|---|---|
+| `btree.c / .h` | Core B-tree operations: insert, search, split, node management |
+| `hctree.c / .h` | Hot/Cold tier logic, hit scoring, promotion policy, ML controllers |
+| `main.c` | CLI argument parsing, workload generation, experiment orchestration |
+| `analyze_hctree.py` | Post-run analysis: cost curves, promotion rates, D adaptation plots |
+| `results.csv` | Benchmark data from sample runs |
 
 ---
 
-## Running the Code
+## Building & Running
 
-Compile:
+### Prerequisites
+
+- GCC or Clang
+- GNU Make
+- Python 3 with `matplotlib` and `pandas` (for analysis only)
+
+### Compile
+
 ```bash
-make clean
-make
+make clean && make
+```
 
-Run baseline HCIndex:
+### Run Modes
+
+**Baseline HCIndex (no adaptation):**
+```bash
 ./hctree_demo --mode hctree
-Run with fixed sampling rate:
+```
+
+**Fixed sampling rate:**
+```bash
 ./hctree_demo --mode hctree --sample_init 0.5
-Run with ML-adaptive sampling (3 versions in 3 branches):
+```
+
+**ML-adaptive sampling** *(switch branch for each approach)*:
+```bash
 ./hctree_demo --mode hctree --sample_init 0.5 --adapt_sample
+```
 
+### Analyse Results
 
+```bash
+python analyze_hctree.py results.csv
+```
 
+Generates plots for node visit cost over time, sampling rate adaptation curves, and hot/cold tier promotion rates.
 
+---
 
+## Key Concepts
 
+**Sampling Rate D**
+The probability `[0.0, 1.0]` that a key crossing the promotion threshold is actually promoted to the hot tier. A value of `1.0` promotes every hot key; lower values reduce hot-tier churn at the cost of some missed promotions.
 
+**Hit Score**
+Each key in the cold tier accumulates a hit score as it is queried. Once the score exceeds a configurable threshold, the key becomes a candidate for promotion.
+
+**Cold-Node Cost**
+The primary performance metric: the number of cold B-tree node visits per query. Lower values indicate more queries are being served by the hot tier.
+
+---
+
+## Course Context
+
+Developed for **CS 543 — Database System Implementation, Fall 2025** (Project 2). The project explores the intersection of learned index structures and adaptive system design.
+
+---
+
+## License
+
+For academic and educational use. See repository root for full license details.
