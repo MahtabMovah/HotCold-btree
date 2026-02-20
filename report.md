@@ -20,7 +20,7 @@ Our evaluation demonstrates that HCIndex provides **significant reductions in lo
 Our standalone implementation consists of the following files:
 
 ```
-543_Project2/
+HotCold-btree/
 ├── Makefile
 ├── main.c
 ├── btree.c
